@@ -1,0 +1,30 @@
+# macOS
+.DS_Store
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+
+# Gradle / Android build outputs
+.gradle/
+build/
+*/build/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Local machine config
+local.properties
+Application/local.properties
+
+# Secrets / signing
+*.jks
+*.keystore
+*.p12
+*.pem
+keystore.properties
+.env
+
+# Local Polar exports / test captures
+PolarH10_session_*/
+
