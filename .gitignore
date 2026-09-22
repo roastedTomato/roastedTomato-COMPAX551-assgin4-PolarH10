@@ -25,6 +25,4 @@ Application/local.properties
 keystore.properties
 .env
 
-# Local Polar exports / test captures
-PolarH10_session_*/
 
