@@ -83,7 +83,9 @@ private fun PolarH10App() {
                 onStartHr = manager::startHrStream,
                 onStopHr = manager::stopHrStream,
                 onStartAcc = manager::startAccStream,
-                onStopAcc = manager::stopAccStream
+                onStopAcc = manager::stopAccStream,
+                onStartSession = manager::startSession,
+                onStopSession = manager::stopSession
             )
         }
     }
@@ -99,7 +101,9 @@ private fun DashboardScreen(
     onStartHr: () -> Unit,
     onStopHr: () -> Unit,
     onStartAcc: () -> Unit,
-    onStopAcc: () -> Unit
+    onStopAcc: () -> Unit,
+    onStartSession: () -> Unit,
+    onStopSession: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -171,6 +175,12 @@ private fun DashboardScreen(
             onStopAcc = onStopAcc
         )
 
+        SessionCard(
+            state = state,
+            onStartSession = onStartSession,
+            onStopSession = onStopSession
+        )
+
         SensorDataCard(state = state)
 
         DeviceList(
@@ -185,6 +195,39 @@ private fun DashboardScreen(
         )
 
         Spacer(modifier = Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun SessionCard(
+    state: PolarConnectionState,
+    onStartSession: () -> Unit,
+    onStopSession: () -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = "Session Recording",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary
+            )
+            SampleRow(
+                "Status",
+                if (state.isSessionRecording) "Recording #${state.activeSessionId}" else "Not recording"
+            )
+            SampleRow("Saved HR samples", state.savedHrCount.toString())
+            SampleRow("Saved ACC samples", state.savedAccCount.toString())
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                enabled = state.isConnected,
+                onClick = if (state.isSessionRecording) onStopSession else onStartSession
+            ) {
+                Text(if (state.isSessionRecording) "Stop Session" else "Start Session")
+            }
+        }
     }
 }
 

@@ -2,6 +2,8 @@ package com.example.polarh10.polar
 
 import android.content.Context
 import android.util.Log
+import com.example.polarh10.db.DatabaseHelper
+import com.example.polarh10.model.AccSample
 import com.example.polarh10.processing.MovementLevel
 import com.example.polarh10.processing.SensorProcessor
 import com.polar.androidcommunications.api.ble.model.DisInfo
@@ -19,7 +21,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlin.math.sqrt
 
 data class PolarDeviceItem(
     val deviceId: String,
@@ -49,6 +50,10 @@ data class PolarConnectionState(
     val peakMovement: Double = 0.0,
     val movementLevel: MovementLevel = MovementLevel.UNKNOWN,
     val accSampleCount: Long = 0,
+    val activeSessionId: Long? = null,
+    val isSessionRecording: Boolean = false,
+    val savedHrCount: Long = 0,
+    val savedAccCount: Long = 0,
     val message: String = "Not connected"
 )
 
@@ -64,6 +69,7 @@ class PolarH10Manager(
     context: Context,
     private val scope: CoroutineScope
 ) {
+    private val database = DatabaseHelper(context.applicationContext)
     private val api: PolarBleApi = PolarBleApiDefaultImpl.defaultImplementation(
         context.applicationContext,
         setOf(
@@ -120,6 +126,10 @@ class PolarH10Manager(
                         peakMovement = 0.0,
                         movementLevel = MovementLevel.UNKNOWN,
                         accSampleCount = 0,
+                        activeSessionId = null,
+                        isSessionRecording = false,
+                        savedHrCount = 0,
+                        savedAccCount = 0,
                         message = "Connected to ${polarDeviceInfo.deviceId}"
                     )
                 }
@@ -243,6 +253,7 @@ class PolarH10Manager(
 
     fun disconnect() {
         val deviceId = _state.value.connectedDeviceId ?: return
+        stopSession()
         stopStreams()
         runCatching { api.disconnectFromDevice(deviceId) }
             .onFailure { error ->
@@ -250,6 +261,57 @@ class PolarH10Manager(
                     it.copy(message = "Disconnect failed: ${error.message ?: "unknown error"}")
                 }
             }
+    }
+
+    fun startSession() {
+        val deviceId = _state.value.connectedDeviceId ?: run {
+            _state.update { it.copy(message = "Connect to H10 before starting a session") }
+            return
+        }
+        if (_state.value.isSessionRecording) return
+
+        scope.launch(Dispatchers.IO) {
+            runCatching { database.createSession(deviceId) }
+                .onSuccess { sessionId ->
+                    _state.update {
+                        it.copy(
+                            activeSessionId = sessionId,
+                            isSessionRecording = true,
+                            savedHrCount = 0,
+                            savedAccCount = 0,
+                            message = "Session #$sessionId started"
+                        )
+                    }
+                    startHrStream()
+                    startAccStream()
+                }
+                .onFailure { error ->
+                    _state.update {
+                        it.copy(message = "Start session failed: ${error.message ?: "unknown error"}")
+                    }
+                }
+        }
+    }
+
+    fun stopSession() {
+        val sessionId = _state.value.activeSessionId ?: return
+        scope.launch(Dispatchers.IO) {
+            runCatching { database.endSession(sessionId) }
+                .onSuccess {
+                    _state.update {
+                        it.copy(
+                            activeSessionId = null,
+                            isSessionRecording = false,
+                            message = "Session #$sessionId saved"
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    _state.update {
+                        it.copy(message = "Stop session failed: ${error.message ?: "unknown error"}")
+                    }
+                }
+        }
     }
 
     fun startHrStream() {
@@ -279,6 +341,15 @@ class PolarH10Manager(
                 .collect { hrData ->
                     val sample = hrData.samples.lastOrNull() ?: return@collect
                     val summary = processor.addHeartRate(sample.hr)
+                    val sessionId = _state.value.activeSessionId
+                    if (sessionId != null) {
+                        database.insertHr(
+                            sessionId = sessionId,
+                            timestamp = System.currentTimeMillis(),
+                            hr = sample.hr,
+                            rr = sample.rrsMs.takeIf { it.isNotEmpty() }?.joinToString(",")
+                        )
+                    }
                     _state.update {
                         it.copy(
                             latestHr = summary.latest,
@@ -287,6 +358,7 @@ class PolarH10Manager(
                             maxHr = summary.max,
                             latestRrMs = sample.rrsMs,
                             hrSampleCount = summary.sampleCount,
+                            savedHrCount = if (sessionId != null) it.savedHrCount + 1 else it.savedHrCount,
                             message = "HR ${sample.hr} bpm"
                         )
                     }
@@ -351,6 +423,21 @@ class PolarH10Manager(
                             timestamp = sample.timeStamp,
                             magnitude = summary.latestMagnitude
                         )
+                        val sessionId = _state.value.activeSessionId
+                        if (sessionId != null) {
+                            database.insertAccBatch(
+                                accData.samples.map { accSample ->
+                                    AccSample(
+                                        id = 0,
+                                        sessionId = sessionId,
+                                        timestamp = accSample.timeStamp,
+                                        x = accSample.x,
+                                        y = accSample.y,
+                                        z = accSample.z
+                                    )
+                                }
+                            )
+                        }
                         _state.update {
                             it.copy(
                                 latestAcc = reading,
@@ -358,6 +445,11 @@ class PolarH10Manager(
                                 peakMovement = summary.peakIntensity,
                                 movementLevel = summary.level,
                                 accSampleCount = summary.sampleCount,
+                                savedAccCount = if (sessionId != null) {
+                                    it.savedAccCount + accData.samples.size
+                                } else {
+                                    it.savedAccCount
+                                },
                                 message = "Movement ${summary.level.name.lowercase()}"
                             )
                         }
@@ -391,9 +483,11 @@ class PolarH10Manager(
     }
 
     fun shutdown() {
+        stopSession()
         stopScan()
         stopStreams()
         api.shutDown()
+        database.close()
     }
 
     private companion object {
