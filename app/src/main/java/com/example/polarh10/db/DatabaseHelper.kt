@@ -5,10 +5,12 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import com.example.polarh10.model.AccSample
+import com.example.polarh10.model.AccStats
 import com.example.polarh10.model.EcgSample
 import com.example.polarh10.model.HrSample
 import com.example.polarh10.model.HrStats
 import com.example.polarh10.model.SessionSummary
+import kotlin.math.sqrt
 
 /**
  * ============================================================
@@ -304,6 +306,34 @@ class DatabaseHelper(context: Context) :
                 )
             } else HrStats(0, 0.0, 0, 0)
         }
+    }
+
+    /** 【历史查询】某会话的加速度统计：条数 / 平均合成值 / 最大合成值 */
+    fun getAccStats(sessionId: Long): AccStats {
+        var count = 0L
+        var totalMagnitude = 0.0
+        var peakMagnitude = 0.0
+
+        readableDatabase.rawQuery(
+            "SELECT x, y, z FROM $TABLE_ACC WHERE session_id=?",
+            arrayOf(sessionId.toString())
+        ).use { c ->
+            while (c.moveToNext()) {
+                val x = c.getInt(0).toDouble()
+                val y = c.getInt(1).toDouble()
+                val z = c.getInt(2).toDouble()
+                val magnitude = sqrt(x * x + y * y + z * z)
+                totalMagnitude += magnitude
+                if (magnitude > peakMagnitude) peakMagnitude = magnitude
+                count++
+            }
+        }
+
+        return AccStats(
+            count = count,
+            avgMagnitude = if (count == 0L) 0.0 else totalMagnitude / count,
+            peakMagnitude = peakMagnitude
+        )
     }
 
     /** 【历史查询】分页查询心率样本（按时间升序；limit/offset 分页，传 Int.MAX_VALUE 即全量） */

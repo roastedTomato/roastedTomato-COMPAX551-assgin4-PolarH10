@@ -81,3 +81,13 @@ data class HrStats(
     /** 最低心率（bpm） */
     val min: Int
 )
+
+/** 【历史查询】某会话的加速度统计结果 */
+data class AccStats(
+    /** 加速度样本条数 */
+    val count: Long,
+    /** 平均三轴合成加速度（mG） */
+    val avgMagnitude: Double,
+    /** 最大三轴合成加速度（mG） */
+    val peakMagnitude: Double
+)

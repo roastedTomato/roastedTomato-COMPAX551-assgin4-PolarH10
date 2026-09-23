@@ -4,7 +4,11 @@ import android.content.Context
 import android.util.Log
 import com.example.polarh10.db.DatabaseHelper
 import com.example.polarh10.importer.SampleHistoryImporter
+import com.example.polarh10.model.AccStats
 import com.example.polarh10.model.AccSample
+import com.example.polarh10.model.HrSample
+import com.example.polarh10.model.HrStats
+import com.example.polarh10.model.SessionSummary
 import com.example.polarh10.processing.MovementLevel
 import com.example.polarh10.processing.SensorProcessor
 import com.polar.androidcommunications.api.ble.model.DisInfo
@@ -58,7 +62,22 @@ data class PolarConnectionState(
     val isImportingHistory: Boolean = false,
     val importedSessionId: Long? = null,
     val importMessage: String = "No sample history imported",
+    val historySessions: List<HistorySessionItem> = emptyList(),
+    val isLoadingHistory: Boolean = false,
+    val selectedHistory: HistoryDetail? = null,
+    val isLoadingHistoryDetail: Boolean = false,
     val message: String = "Not connected"
+)
+
+data class HistorySessionItem(
+    val session: SessionSummary,
+    val hrStats: HrStats,
+    val accStats: AccStats
+)
+
+data class HistoryDetail(
+    val item: HistorySessionItem,
+    val hrSamples: List<HrSample>
 )
 
 data class AccReading(
@@ -184,6 +203,7 @@ class PolarH10Manager(
                 data: PolarHealthThermometerData
             ) = Unit
         })
+        refreshHistory()
     }
 
     fun startScan() {
@@ -310,6 +330,7 @@ class PolarH10Manager(
                             message = "Session #$sessionId saved"
                         )
                     }
+                    refreshHistory()
                 }
                 .onFailure { error ->
                     _state.update {
@@ -339,12 +360,75 @@ class PolarH10Manager(
                         message = "Sample history imported"
                     )
                 }
+                refreshHistory()
             }.onFailure { error ->
                 _state.update {
                     it.copy(
                         isImportingHistory = false,
                         importMessage = "Import failed: ${error.message ?: "unknown error"}",
                         message = "Sample import failed"
+                    )
+                }
+            }
+        }
+    }
+
+    fun refreshHistory() {
+        _state.update { it.copy(isLoadingHistory = true) }
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                database.getSessions().map { session ->
+                    HistorySessionItem(
+                        session = session,
+                        hrStats = database.getHrStats(session.id),
+                        accStats = database.getAccStats(session.id)
+                    )
+                }
+            }.onSuccess { sessions ->
+                _state.update {
+                    it.copy(
+                        historySessions = sessions,
+                        isLoadingHistory = false
+                    )
+                }
+            }.onFailure { error ->
+                _state.update {
+                    it.copy(
+                        isLoadingHistory = false,
+                        message = "Load history failed: ${error.message ?: "unknown error"}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun loadHistoryDetail(sessionId: Long) {
+        _state.update { it.copy(isLoadingHistoryDetail = true) }
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                val session = database.getSession(sessionId)
+                    ?: error("Session #$sessionId not found")
+                val item = HistorySessionItem(
+                    session = session,
+                    hrStats = database.getHrStats(sessionId),
+                    accStats = database.getAccStats(sessionId)
+                )
+                HistoryDetail(
+                    item = item,
+                    hrSamples = database.getHrSamples(sessionId, Int.MAX_VALUE, 0)
+                )
+            }.onSuccess { detail ->
+                _state.update {
+                    it.copy(
+                        selectedHistory = detail,
+                        isLoadingHistoryDetail = false
+                    )
+                }
+            }.onFailure { error ->
+                _state.update {
+                    it.copy(
+                        isLoadingHistoryDetail = false,
+                        message = "Load detail failed: ${error.message ?: "unknown error"}"
                     )
                 }
             }

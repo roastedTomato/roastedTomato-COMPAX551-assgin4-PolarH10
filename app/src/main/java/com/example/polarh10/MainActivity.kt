@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
@@ -29,17 +30,25 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.polarh10.polar.HistorySessionItem
+import com.example.polarh10.model.HrSample
 import com.example.polarh10.polar.PolarConnectionState
 import com.example.polarh10.polar.PolarDeviceItem
 import com.example.polarh10.polar.PolarH10Manager
 import com.example.polarh10.processing.MovementLevel
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -50,12 +59,18 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+private enum class AppPage {
+    Dashboard,
+    History
+}
+
 @Composable
 private fun PolarH10App() {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val manager = remember { PolarH10Manager(context, scope) }
     val state by manager.state.collectAsState()
+    var page by remember { mutableStateOf(AppPage.Dashboard) }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
@@ -74,22 +89,35 @@ private fun PolarH10App() {
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.background
         ) {
-            DashboardScreen(
-                state = state,
-                onScan = {
-                    permissionLauncher.launch(requiredBluetoothPermissions())
-                },
-                onStopScan = manager::stopScan,
-                onConnect = manager::connect,
-                onDisconnect = manager::disconnect,
-                onStartHr = manager::startHrStream,
-                onStopHr = manager::stopHrStream,
-                onStartAcc = manager::startAccStream,
-                onStopAcc = manager::stopAccStream,
-                onStartSession = manager::startSession,
-                onStopSession = manager::stopSession,
-                onImportSampleHistory = manager::importSampleHistory
-            )
+            when (page) {
+                AppPage.Dashboard -> DashboardScreen(
+                    state = state,
+                    onScan = {
+                        permissionLauncher.launch(requiredBluetoothPermissions())
+                    },
+                    onStopScan = manager::stopScan,
+                    onConnect = manager::connect,
+                    onDisconnect = manager::disconnect,
+                    onStartHr = manager::startHrStream,
+                    onStopHr = manager::stopHrStream,
+                    onStartAcc = manager::startAccStream,
+                    onStopAcc = manager::stopAccStream,
+                    onStartSession = manager::startSession,
+                    onStopSession = manager::stopSession,
+                    onImportSampleHistory = manager::importSampleHistory,
+                    onOpenHistory = {
+                        manager.refreshHistory()
+                        page = AppPage.History
+                    }
+                )
+
+                AppPage.History -> HistoryScreen(
+                    state = state,
+                    onBack = { page = AppPage.Dashboard },
+                    onRefreshHistory = manager::refreshHistory,
+                    onSelectSession = manager::loadHistoryDetail
+                )
+            }
         }
     }
 }
@@ -107,7 +135,8 @@ private fun DashboardScreen(
     onStopAcc: () -> Unit,
     onStartSession: () -> Unit,
     onStopSession: () -> Unit,
-    onImportSampleHistory: () -> Unit
+    onImportSampleHistory: () -> Unit,
+    onOpenHistory: () -> Unit
 ) {
     val scrollState = rememberScrollState()
     Column(
@@ -192,6 +221,13 @@ private fun DashboardScreen(
             onImportSampleHistory = onImportSampleHistory
         )
 
+        Button(
+            modifier = Modifier.fillMaxWidth(),
+            onClick = onOpenHistory
+        ) {
+            Text("Open History")
+        }
+
         SensorDataCard(state = state)
 
         DeviceList(
@@ -206,6 +242,231 @@ private fun DashboardScreen(
         )
 
         Spacer(modifier = Modifier.height(12.dp))
+    }
+}
+
+@Composable
+private fun HistoryScreen(
+    state: PolarConnectionState,
+    onBack: () -> Unit,
+    onRefreshHistory: () -> Unit,
+    onSelectSession: (Long) -> Unit
+) {
+    val scrollState = rememberScrollState()
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(scrollState)
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Button(onClick = onBack) {
+                Text("Back")
+            }
+            Text(
+                text = "History",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        Button(
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !state.isLoadingHistory,
+            onClick = onRefreshHistory
+        ) {
+            Text(if (state.isLoadingHistory) "Loading..." else "Refresh History")
+        }
+
+        if (state.historySessions.isEmpty()) {
+            StatusCard(
+                title = "Saved Sessions",
+                primary = "No saved session yet",
+                secondary = "Import sample history or record a new session first"
+            )
+        } else {
+            state.historySessions.forEach { item ->
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSelectSession(item.session.id) }
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        HistorySessionRow(item)
+                        Text(
+                            text = "Tap to view chart",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            }
+        }
+
+        state.selectedHistory?.let { detail ->
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "Heart Rate Chart - Session #${detail.item.session.id}",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    HeartRateChart(samples = detail.hrSamples)
+                    SampleRow("Samples", detail.hrSamples.size.toString())
+                    SampleRow(
+                        "Avg / Min / Max",
+                        "%.1f / %d / %d bpm".format(
+                            detail.item.hrStats.avg,
+                            detail.item.hrStats.min,
+                            detail.item.hrStats.max
+                        )
+                    )
+                }
+            }
+        } ?: if (state.isLoadingHistoryDetail) {
+            StatusCard(
+                title = "Chart",
+                primary = "Loading...",
+                secondary = "Reading session data"
+            )
+        } else {
+            StatusCard(
+                title = "Chart",
+                primary = "Select a session",
+                secondary = "Tap a history item to show the heart rate curve"
+            )
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+    }
+}
+
+@Composable
+private fun HeartRateChart(samples: List<HrSample>) {
+    if (samples.size < 2) {
+        Text(
+            text = "Not enough HR data for chart",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        return
+    }
+
+    val lineColor = MaterialTheme.colorScheme.primary
+    val gridColor = MaterialTheme.colorScheme.outlineVariant
+    val values = remember(samples) { samples.map { it.hr } }
+    val minHr = values.minOrNull() ?: 0
+    val maxHr = values.maxOrNull() ?: 0
+    val range = (maxHr - minHr).coerceAtLeast(1)
+
+    Canvas(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(220.dp)
+    ) {
+        val leftPadding = 8.dp.toPx()
+        val rightPadding = 8.dp.toPx()
+        val topPadding = 12.dp.toPx()
+        val bottomPadding = 18.dp.toPx()
+        val chartWidth = size.width - leftPadding - rightPadding
+        val chartHeight = size.height - topPadding - bottomPadding
+
+        repeat(4) { index ->
+            val y = topPadding + chartHeight * index / 3f
+            drawLine(
+                color = gridColor,
+                start = Offset(leftPadding, y),
+                end = Offset(size.width - rightPadding, y),
+                strokeWidth = 1.dp.toPx()
+            )
+        }
+
+        val points = values.mapIndexed { index, hr ->
+            val x = leftPadding + chartWidth * index / (values.lastIndex).coerceAtLeast(1)
+            val normalized = (hr - minHr).toFloat() / range
+            val y = topPadding + chartHeight * (1f - normalized)
+            Offset(x, y)
+        }
+
+        points.zipWithNext().forEach { (start, end) ->
+            drawLine(
+                color = lineColor,
+                start = start,
+                end = end,
+                strokeWidth = 3.dp.toPx()
+            )
+        }
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = "Min $minHr bpm",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = "Max $maxHr bpm",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+@Composable
+private fun HistorySessionRow(item: HistorySessionItem) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text(
+            text = "Session #${item.session.id}",
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.SemiBold
+        )
+        Text(
+            text = "${formatDate(item.session.startTime)} - ${durationText(item.session.startTime, item.session.endTime)}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        SampleRow("Device", item.session.deviceId)
+        SampleRow(
+            "HR avg / min / max",
+            if (item.hrStats.count == 0L) {
+                "--"
+            } else {
+                "%.1f / %d / %d bpm".format(
+                    item.hrStats.avg,
+                    item.hrStats.min,
+                    item.hrStats.max
+                )
+            }
+        )
+        SampleRow("HR samples", item.session.hrCount.toString())
+        SampleRow("ACC samples", item.session.accCount.toString())
+        SampleRow(
+            "ACC avg / peak",
+            if (item.accStats.count == 0L) {
+                "--"
+            } else {
+                "%.0f / %.0f mG".format(
+                    item.accStats.avgMagnitude,
+                    item.accStats.peakMagnitude
+                )
+            }
+        )
     }
 }
 
@@ -507,3 +768,18 @@ private fun hrStatsText(state: PolarConnectionState): String =
             state.maxHr ?: 0
         )
     }
+
+private fun formatDate(timestamp: Long): String =
+    SimpleDateFormat("dd MMM HH:mm", Locale.getDefault()).format(Date(timestamp))
+
+private fun durationText(startTime: Long, endTime: Long?): String {
+    if (endTime == null) return "running"
+    val seconds = ((endTime - startTime) / 1000).coerceAtLeast(0)
+    val minutes = seconds / 60
+    val remainingSeconds = seconds % 60
+    return if (minutes > 0) {
+        "${minutes}m ${remainingSeconds}s"
+    } else {
+        "${remainingSeconds}s"
+    }
+}
