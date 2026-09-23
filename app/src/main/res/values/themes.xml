@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.PolarH10" parent="Theme.AppCompat.DayNight.NoActionBar">
-        <item name="colorPrimary">@color/polar_red</item>
-        <item name="colorPrimaryDark">@color/polar_red_dark</item>
-        <item name="colorAccent">@color/polar_red</item>
+    <style name="Theme.PolarH10" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:colorAccent">@color/polar_red</item>
+        <item name="android:navigationBarColor">@color/polar_red_dark</item>
+        <item name="android:statusBarColor">@color/polar_red_dark</item>
     </style>
 </resources>

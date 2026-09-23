@@ -4,13 +4,13 @@ plugins {
 }
 
 android {
-    namespace = "com.example.a4test"
+    namespace = "com.example.polarh10"
     compileSdk {
         version = release(37)
     }
 
     defaultConfig {
-        applicationId = "com.example.a4test"
+        applicationId = "com.example.polarh10"
         minSdk = 24
         targetSdk = 37
         versionCode = 1
