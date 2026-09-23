@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -77,7 +78,11 @@ private fun PolarH10App() {
                 },
                 onStopScan = manager::stopScan,
                 onConnect = manager::connect,
-                onDisconnect = manager::disconnect
+                onDisconnect = manager::disconnect,
+                onStartHr = manager::startHrStream,
+                onStopHr = manager::stopHrStream,
+                onStartAcc = manager::startAccStream,
+                onStopAcc = manager::stopAccStream
             )
         }
     }
@@ -89,7 +94,11 @@ private fun DashboardScreen(
     onScan: () -> Unit,
     onStopScan: () -> Unit,
     onConnect: (String) -> Unit,
-    onDisconnect: () -> Unit
+    onDisconnect: () -> Unit,
+    onStartHr: () -> Unit,
+    onStopHr: () -> Unit,
+    onStartAcc: () -> Unit,
+    onStopAcc: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -139,15 +148,25 @@ private fun DashboardScreen(
         ) {
             MetricCard(
                 modifier = Modifier.weight(1f),
-                label = "Device",
-                value = state.connectedDeviceId ?: "--"
+                label = "Heart Rate",
+                value = state.latestHr?.let { "$it bpm" } ?: "--"
             )
             MetricCard(
                 modifier = Modifier.weight(1f),
-                label = "Battery",
-                value = state.batteryLevel?.let { "$it%" } ?: "--"
+                label = "Movement",
+                value = state.latestAcc?.let { "%.0f mG".format(it.magnitude) } ?: "--"
             )
         }
+
+        StreamControls(
+            state = state,
+            onStartHr = onStartHr,
+            onStopHr = onStopHr,
+            onStartAcc = onStartAcc,
+            onStopAcc = onStopAcc
+        )
+
+        SensorDataCard(state = state)
 
         DeviceList(
             devices = state.devices,
@@ -161,6 +180,84 @@ private fun DashboardScreen(
         )
 
         Spacer(modifier = Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun StreamControls(
+    state: PolarConnectionState,
+    onStartHr: () -> Unit,
+    onStopHr: () -> Unit,
+    onStartAcc: () -> Unit,
+    onStopAcc: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Button(
+            modifier = Modifier.weight(1f),
+            enabled = state.isConnected,
+            onClick = if (state.isHrStreaming) onStopHr else onStartHr
+        ) {
+            Text(if (state.isHrStreaming) "Stop HR" else "Start HR")
+        }
+        Button(
+            modifier = Modifier.weight(1f),
+            enabled = state.isConnected,
+            onClick = if (state.isAccStreaming) onStopAcc else onStartAcc
+        ) {
+            Text(if (state.isAccStreaming) "Stop ACC" else "Start ACC")
+        }
+    }
+}
+
+@Composable
+private fun SensorDataCard(state: PolarConnectionState) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = "Live Samples",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary
+            )
+            SampleRow("HR stream", if (state.isHrStreaming) "Running" else "Stopped")
+            SampleRow("HR samples", state.hrSampleCount.toString())
+            SampleRow(
+                "RR intervals",
+                if (state.latestRrMs.isEmpty()) "--" else state.latestRrMs.joinToString(" ms, ", postfix = " ms")
+            )
+            HorizontalDivider()
+            SampleRow("ACC stream", if (state.isAccStreaming) "Running" else "Stopped")
+            SampleRow("ACC samples", state.accSampleCount.toString())
+            SampleRow(
+                "ACC x/y/z",
+                state.latestAcc?.let { "${it.x}, ${it.y}, ${it.z} mG" } ?: "--"
+            )
+        }
+    }
+}
+
+@Composable
+private fun SampleRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold
+        )
     }
 }
 
