@@ -214,6 +214,8 @@ private fun DashboardScreen(
 
             LiveHeartRateCard(state = state)
 
+            LiveRrCard(state = state)
+
             StreamControls(
                 state = state,
                 onStartHr = onStartHr,
@@ -366,6 +368,25 @@ private fun LiveHeartRateCard(state: PolarConnectionState) {
                 color = MaterialTheme.colorScheme.primary
             )
             HeartRateValueChart(values = state.liveHrValues)
+        }
+    }
+}
+
+@Composable
+private fun LiveRrCard(state: PolarConnectionState) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = "Live RR Intervals",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary
+            )
+            RrValueChart(values = state.liveRrValues)
+            SampleRow("Latest RR", state.latestRrMs.lastOrNull()?.let { "$it ms" } ?: "--")
+            SampleRow("Avg RR", averageIntText(state.liveRrValues, "ms"))
         }
     }
 }
@@ -564,6 +585,16 @@ private fun HistoryDetailCard(
             HeartRateChart(samples = detail.hrSamples)
             HorizontalDivider()
             Text(
+                text = "RR Interval Curve",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary
+            )
+            val rrValues = remember(detail.hrSamples) { rrValuesFromHrSamples(detail.hrSamples) }
+            RrValueChart(values = rrValues)
+            SampleRow("RR intervals", rrValues.size.toString())
+            SampleRow("Avg RR", averageIntText(rrValues, "ms"))
+            HorizontalDivider()
+            Text(
                 text = "ECG Curve",
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.primary
@@ -640,10 +671,41 @@ private fun EcgChart(samples: List<EcgSample>) {
 }
 
 @Composable
+private fun RrValueChart(values: List<Int>) {
+    SimpleLineChart(
+        values = values,
+        emptyText = "Not enough RR data for chart",
+        unit = "ms"
+    )
+}
+
+@Composable
 private fun HeartRateValueChart(values: List<Int>) {
+    SimpleLineChart(
+        values = values,
+        emptyText = "Not enough HR data for chart",
+        unit = "bpm"
+    )
+}
+
+@Composable
+private fun EcgValueChart(values: List<Int>) {
+    SimpleLineChart(
+        values = values,
+        emptyText = "Not enough ECG data for chart",
+        unit = "uV"
+    )
+}
+
+@Composable
+private fun SimpleLineChart(
+    values: List<Int>,
+    emptyText: String,
+    unit: String
+) {
     if (values.size < 2) {
         Text(
-            text = "Not enough HR data for chart",
+            text = emptyText,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -651,79 +713,6 @@ private fun HeartRateValueChart(values: List<Int>) {
     }
 
     val lineColor = MaterialTheme.colorScheme.primary
-    val gridColor = MaterialTheme.colorScheme.outlineVariant
-    val minHr = values.minOrNull() ?: 0
-    val maxHr = values.maxOrNull() ?: 0
-    val range = (maxHr - minHr).coerceAtLeast(1)
-
-    Canvas(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(220.dp)
-    ) {
-        val leftPadding = 8.dp.toPx()
-        val rightPadding = 8.dp.toPx()
-        val topPadding = 12.dp.toPx()
-        val bottomPadding = 18.dp.toPx()
-        val chartWidth = size.width - leftPadding - rightPadding
-        val chartHeight = size.height - topPadding - bottomPadding
-
-        repeat(4) { index ->
-            val y = topPadding + chartHeight * index / 3f
-            drawLine(
-                color = gridColor,
-                start = Offset(leftPadding, y),
-                end = Offset(size.width - rightPadding, y),
-                strokeWidth = 1.dp.toPx()
-            )
-        }
-
-        val points = values.mapIndexed { index, hr ->
-            val x = leftPadding + chartWidth * index / (values.lastIndex).coerceAtLeast(1)
-            val normalized = (hr - minHr).toFloat() / range
-            val y = topPadding + chartHeight * (1f - normalized)
-            Offset(x, y)
-        }
-
-        points.zipWithNext().forEach { (start, end) ->
-            drawLine(
-                color = lineColor,
-                start = start,
-                end = end,
-                strokeWidth = 3.dp.toPx()
-            )
-        }
-    }
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(
-            text = "Min $minHr bpm",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            text = "Max $maxHr bpm",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
-}
-
-@Composable
-private fun EcgValueChart(values: List<Int>) {
-    if (values.size < 2) {
-        Text(
-            text = "Not enough ECG data for chart",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        return
-    }
-
-    val lineColor = MaterialTheme.colorScheme.secondary
     val gridColor = MaterialTheme.colorScheme.outlineVariant
     val minValue = values.minOrNull() ?: 0
     val maxValue = values.maxOrNull() ?: 0
@@ -773,12 +762,12 @@ private fun EcgValueChart(values: List<Int>) {
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Text(
-            text = "Min $minValue uV",
+            text = "Min $minValue $unit",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Text(
-            text = "Max $maxValue uV",
+            text = "Max $maxValue $unit",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -953,6 +942,7 @@ private fun SensorDataCard(state: PolarConnectionState) {
                 "RR intervals",
                 if (state.latestRrMs.isEmpty()) "--" else state.latestRrMs.joinToString(" ms, ", postfix = " ms")
             )
+            SampleRow("Avg RR", averageIntText(state.liveRrValues, "ms"))
             HorizontalDivider()
             SampleRow("ECG stream", if (state.isEcgStreaming) "Running" else "Stopped")
             SampleRow("ECG samples", state.ecgSampleCount.toString())
@@ -1217,3 +1207,18 @@ private fun liveCaloriesText(state: PolarConnectionState): String {
     val calories = minutes * weight * state.averageHr / 200.0
     return "%.0f kcal".format(calories)
 }
+
+private fun rrValuesFromHrSamples(samples: List<HrSample>): List<Int> =
+    samples.flatMap { sample ->
+        sample.rr
+            ?.split(",")
+            ?.mapNotNull { value -> value.trim().toIntOrNull() }
+            .orEmpty()
+    }
+
+private fun averageIntText(values: List<Int>, unit: String): String =
+    if (values.isEmpty()) {
+        "--"
+    } else {
+        "${values.average().toInt()} $unit"
+    }

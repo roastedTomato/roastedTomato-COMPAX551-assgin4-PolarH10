@@ -53,6 +53,7 @@ data class PolarConnectionState(
     val minHr: Int? = null,
     val maxHr: Int? = null,
     val liveHrValues: List<Int> = emptyList(),
+    val liveRrValues: List<Int> = emptyList(),
     val liveEcgValues: List<Int> = emptyList(),
     val latestEcgVoltage: Int? = null,
     val latestRrMs: List<Int> = emptyList(),
@@ -164,6 +165,7 @@ class PolarH10Manager(
                         minHr = null,
                         maxHr = null,
                         liveHrValues = emptyList(),
+                        liveRrValues = emptyList(),
                         liveEcgValues = emptyList(),
                         latestEcgVoltage = null,
                         latestRrMs = emptyList(),
@@ -334,6 +336,7 @@ class PolarH10Manager(
                             savedAccCount = 0,
                             savedEcgCount = 0,
                             liveHrValues = emptyList(),
+                            liveRrValues = emptyList(),
                             liveEcgValues = emptyList(),
                             message = "Session #$sessionId started"
                         )
@@ -518,6 +521,7 @@ class PolarH10Manager(
                             minHr = summary.min,
                             maxHr = summary.max,
                             liveHrValues = (it.liveHrValues + sample.hr).takeLast(120),
+                            liveRrValues = (it.liveRrValues + sample.rrsMs).takeLast(120),
                             latestRrMs = sample.rrsMs,
                             hrSampleCount = summary.sampleCount,
                             savedHrCount = if (sessionId != null) it.savedHrCount + 1 else it.savedHrCount,
