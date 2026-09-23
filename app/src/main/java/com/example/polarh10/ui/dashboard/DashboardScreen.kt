@@ -10,12 +10,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonColors
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -110,21 +112,17 @@ fun DashboardScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Button(
+                DashboardButton(
                     modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = PanelStrong),
+                    text = if (state.isScanning) "Stop Scan" else "Scan",
                     onClick = if (state.isScanning) onStopScan else onScan
-                ) {
-                    Text(if (state.isScanning) "Stop Scan" else "Scan")
-                }
-                Button(
+                )
+                DashboardButton(
                     modifier = Modifier.weight(1f),
+                    text = "Disconnect",
                     enabled = state.isConnected,
-                    colors = ButtonDefaults.buttonColors(containerColor = PanelStrong),
                     onClick = onDisconnect
-                ) {
-                    Text("Disconnect")
-                }
+                )
             }
 
             Row(
@@ -179,28 +177,83 @@ fun DashboardScreen(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Button(
+            PrimaryActionButton(
                 modifier = Modifier.weight(1f),
-                enabled = state.isConnected,
+                text = if (state.isSessionRecording) "Stop Session" else "Start Session",
                 colors = ButtonDefaults.buttonColors(
                     containerColor = if (state.isSessionRecording) Danger else Good,
                     contentColor = Color.White
                 ),
                 onClick = if (state.isSessionRecording) onStopSession else onStartSession
-            ) {
-                Text(if (state.isSessionRecording) "Stop Session" else "Start Session")
-            }
-            Button(
+            )
+            PrimaryActionButton(
                 modifier = Modifier.weight(1f),
+                text = "Open History",
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.secondary,
+                    containerColor = Color(0xFF0A84FF),
                     contentColor = Color.White
                 ),
                 onClick = onOpenHistory
-            ) {
-                Text("Open History")
-            }
+            )
         }
+    }
+}
+
+@Composable
+private fun DashboardButton(
+    modifier: Modifier = Modifier,
+    text: String,
+    enabled: Boolean = true,
+    colors: ButtonColors = ButtonDefaults.buttonColors(containerColor = PanelStrong),
+    onClick: () -> Unit
+) {
+    Button(
+        modifier = modifier
+            .height(48.dp)
+            .defaultMinSize(minHeight = 48.dp),
+        enabled = enabled,
+        colors = colors.copy(
+            disabledContainerColor = PanelStrong.copy(alpha = 0.75f),
+            disabledContentColor = Color.White.copy(alpha = 0.6f)
+        ),
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, Stroke),
+        onClick = onClick
+    ) {
+        Text(
+            text = text,
+            fontWeight = FontWeight.SemiBold,
+            color = if (enabled) Color.White else Color.White.copy(alpha = 0.6f)
+        )
+    }
+}
+
+@Composable
+private fun PrimaryActionButton(
+    modifier: Modifier = Modifier,
+    text: String,
+    enabled: Boolean = true,
+    colors: ButtonColors,
+    onClick: () -> Unit
+) {
+    Button(
+        modifier = modifier
+            .height(56.dp)
+            .defaultMinSize(minHeight = 56.dp),
+        enabled = enabled,
+        colors = colors.copy(
+            disabledContainerColor = PanelStrong.copy(alpha = 0.75f),
+            disabledContentColor = Color.White.copy(alpha = 0.6f)
+        ),
+        shape = RoundedCornerShape(18.dp),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.18f)),
+        onClick = onClick
+    ) {
+        Text(
+            text = text,
+            fontWeight = FontWeight.Bold,
+            color = if (enabled) Color.White else Color.White.copy(alpha = 0.6f)
+        )
     }
 }
 
@@ -399,13 +452,16 @@ fun SessionCard(
             SampleRow("Saved HR samples", state.savedHrCount.toString())
             SampleRow("Saved ACC samples", state.savedAccCount.toString())
             SampleRow("Saved ECG samples", state.savedEcgCount.toString())
-            Button(
+            PrimaryActionButton(
                 modifier = Modifier.fillMaxWidth(),
+                text = if (state.isSessionRecording) "Stop Session" else "Start Session",
                 enabled = state.isConnected,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (state.isSessionRecording) Danger else Good,
+                    contentColor = Color.White
+                ),
                 onClick = if (state.isSessionRecording) onStopSession else onStartSession
-            ) {
-                Text(if (state.isSessionRecording) "Stop Session" else "Start Session")
-            }
+            )
         }
     }
 }
@@ -425,28 +481,25 @@ fun StreamControls(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Button(
+            DashboardButton(
                 modifier = Modifier.weight(1f),
+                text = if (state.isHrStreaming) "Stop HR" else "Start HR",
                 enabled = state.isConnected,
                 onClick = if (state.isHrStreaming) onStopHr else onStartHr
-            ) {
-                Text(if (state.isHrStreaming) "Stop HR" else "Start HR")
-            }
-            Button(
+            )
+            DashboardButton(
                 modifier = Modifier.weight(1f),
+                text = if (state.isAccStreaming) "Stop ACC" else "Start ACC",
                 enabled = state.isConnected,
                 onClick = if (state.isAccStreaming) onStopAcc else onStartAcc
-            ) {
-                Text(if (state.isAccStreaming) "Stop ACC" else "Start ACC")
-            }
+            )
         }
-        Button(
+        DashboardButton(
             modifier = Modifier.fillMaxWidth(),
+            text = if (state.isEcgStreaming) "Stop ECG" else "Start ECG",
             enabled = state.isConnected,
             onClick = if (state.isEcgStreaming) onStopEcg else onStartEcg
-        ) {
-            Text(if (state.isEcgStreaming) "Stop ECG" else "Start ECG")
-        }
+        )
     }
 }
 
