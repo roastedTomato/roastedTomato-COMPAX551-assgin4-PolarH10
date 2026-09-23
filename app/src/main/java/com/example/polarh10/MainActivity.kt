@@ -44,6 +44,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.AlertDialog
+import com.example.polarh10.model.EcgSample
 import com.example.polarh10.model.HrSample
 import com.example.polarh10.polar.HistoryDetail
 import com.example.polarh10.polar.HistorySessionItem
@@ -108,6 +109,8 @@ private fun PolarH10App() {
                     onStopHr = manager::stopHrStream,
                     onStartAcc = manager::startAccStream,
                     onStopAcc = manager::stopAccStream,
+                    onStartEcg = manager::startEcgStream,
+                    onStopEcg = manager::stopEcgStream,
                     onStartSession = manager::startSession,
                     onStopSession = manager::stopSession,
                     onOpenHistory = {
@@ -140,6 +143,8 @@ private fun DashboardScreen(
     onStopHr: () -> Unit,
     onStartAcc: () -> Unit,
     onStopAcc: () -> Unit,
+    onStartEcg: () -> Unit,
+    onStopEcg: () -> Unit,
     onStartSession: () -> Unit,
     onStopSession: () -> Unit,
     onOpenHistory: () -> Unit
@@ -214,8 +219,12 @@ private fun DashboardScreen(
                 onStartHr = onStartHr,
                 onStopHr = onStopHr,
                 onStartAcc = onStartAcc,
-                onStopAcc = onStopAcc
+                onStopAcc = onStopAcc,
+                onStartEcg = onStartEcg,
+                onStopEcg = onStopEcg
             )
+
+            LiveEcgCard(state = state)
 
             SensorDataCard(state = state)
 
@@ -357,6 +366,25 @@ private fun LiveHeartRateCard(state: PolarConnectionState) {
                 color = MaterialTheme.colorScheme.primary
             )
             HeartRateValueChart(values = state.liveHrValues)
+        }
+    }
+}
+
+@Composable
+private fun LiveEcgCard(state: PolarConnectionState) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = "Live ECG Curve",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary
+            )
+            EcgValueChart(values = state.liveEcgValues)
+            SampleRow("Latest ECG", state.latestEcgVoltage?.let { "$it uV" } ?: "--")
+            SampleRow("ECG samples", state.ecgSampleCount.toString())
         }
     }
 }
@@ -534,6 +562,14 @@ private fun HistoryDetailCard(
                 color = MaterialTheme.colorScheme.primary
             )
             HeartRateChart(samples = detail.hrSamples)
+            HorizontalDivider()
+            Text(
+                text = "ECG Curve",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary
+            )
+            EcgChart(samples = detail.ecgSamples)
+            SampleRow("ECG samples", detail.item.session.ecgCount.toString())
         }
     }
 }
@@ -596,6 +632,11 @@ private fun HistoryMetricGrid(
 @Composable
 private fun HeartRateChart(samples: List<HrSample>) {
     HeartRateValueChart(values = remember(samples) { samples.map { it.hr } })
+}
+
+@Composable
+private fun EcgChart(samples: List<EcgSample>) {
+    EcgValueChart(values = remember(samples) { samples.map { it.voltage } })
 }
 
 @Composable
@@ -665,6 +706,79 @@ private fun HeartRateValueChart(values: List<Int>) {
         )
         Text(
             text = "Max $maxHr bpm",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun EcgValueChart(values: List<Int>) {
+    if (values.size < 2) {
+        Text(
+            text = "Not enough ECG data for chart",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        return
+    }
+
+    val lineColor = MaterialTheme.colorScheme.secondary
+    val gridColor = MaterialTheme.colorScheme.outlineVariant
+    val minValue = values.minOrNull() ?: 0
+    val maxValue = values.maxOrNull() ?: 0
+    val range = (maxValue - minValue).coerceAtLeast(1)
+
+    Canvas(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(180.dp)
+    ) {
+        val leftPadding = 8.dp.toPx()
+        val rightPadding = 8.dp.toPx()
+        val topPadding = 12.dp.toPx()
+        val bottomPadding = 18.dp.toPx()
+        val chartWidth = size.width - leftPadding - rightPadding
+        val chartHeight = size.height - topPadding - bottomPadding
+
+        repeat(4) { index ->
+            val y = topPadding + chartHeight * index / 3f
+            drawLine(
+                color = gridColor,
+                start = Offset(leftPadding, y),
+                end = Offset(size.width - rightPadding, y),
+                strokeWidth = 1.dp.toPx()
+            )
+        }
+
+        val points = values.mapIndexed { index, value ->
+            val x = leftPadding + chartWidth * index / (values.lastIndex).coerceAtLeast(1)
+            val normalized = (value - minValue).toFloat() / range
+            val y = topPadding + chartHeight * (1f - normalized)
+            Offset(x, y)
+        }
+
+        points.zipWithNext().forEach { (start, end) ->
+            drawLine(
+                color = lineColor,
+                start = start,
+                end = end,
+                strokeWidth = 2.dp.toPx()
+            )
+        }
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = "Min $minValue uV",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = "Max $maxValue uV",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -768,6 +882,7 @@ private fun SessionCard(
             )
             SampleRow("Saved HR samples", state.savedHrCount.toString())
             SampleRow("Saved ACC samples", state.savedAccCount.toString())
+            SampleRow("Saved ECG samples", state.savedEcgCount.toString())
             Button(
                 modifier = Modifier.fillMaxWidth(),
                 enabled = state.isConnected,
@@ -785,25 +900,36 @@ private fun StreamControls(
     onStartHr: () -> Unit,
     onStopHr: () -> Unit,
     onStartAcc: () -> Unit,
-    onStopAcc: () -> Unit
+    onStopAcc: () -> Unit,
+    onStartEcg: () -> Unit,
+    onStopEcg: () -> Unit
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Button(
-            modifier = Modifier.weight(1f),
-            enabled = state.isConnected,
-            onClick = if (state.isHrStreaming) onStopHr else onStartHr
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text(if (state.isHrStreaming) "Stop HR" else "Start HR")
+            Button(
+                modifier = Modifier.weight(1f),
+                enabled = state.isConnected,
+                onClick = if (state.isHrStreaming) onStopHr else onStartHr
+            ) {
+                Text(if (state.isHrStreaming) "Stop HR" else "Start HR")
+            }
+            Button(
+                modifier = Modifier.weight(1f),
+                enabled = state.isConnected,
+                onClick = if (state.isAccStreaming) onStopAcc else onStartAcc
+            ) {
+                Text(if (state.isAccStreaming) "Stop ACC" else "Start ACC")
+            }
         }
         Button(
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.fillMaxWidth(),
             enabled = state.isConnected,
-            onClick = if (state.isAccStreaming) onStopAcc else onStartAcc
+            onClick = if (state.isEcgStreaming) onStopEcg else onStartEcg
         ) {
-            Text(if (state.isAccStreaming) "Stop ACC" else "Start ACC")
+            Text(if (state.isEcgStreaming) "Stop ECG" else "Start ECG")
         }
     }
 }
@@ -827,6 +953,10 @@ private fun SensorDataCard(state: PolarConnectionState) {
                 "RR intervals",
                 if (state.latestRrMs.isEmpty()) "--" else state.latestRrMs.joinToString(" ms, ", postfix = " ms")
             )
+            HorizontalDivider()
+            SampleRow("ECG stream", if (state.isEcgStreaming) "Running" else "Stopped")
+            SampleRow("ECG samples", state.ecgSampleCount.toString())
+            SampleRow("Latest ECG", state.latestEcgVoltage?.let { "$it uV" } ?: "--")
             HorizontalDivider()
             SampleRow("ACC stream", if (state.isAccStreaming) "Running" else "Stopped")
             SampleRow("ACC samples", state.accSampleCount.toString())

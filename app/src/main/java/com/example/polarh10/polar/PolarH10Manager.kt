@@ -2,10 +2,12 @@ package com.example.polarh10.polar
 
 import android.content.Context
 import android.util.Log
+import com.polar.androidcommunications.api.ble.model.gatt.client.pmd.PmdMeasurementType
 import com.example.polarh10.db.DatabaseHelper
 import com.example.polarh10.importer.SampleHistoryImporter
 import com.example.polarh10.model.AccStats
 import com.example.polarh10.model.AccSample
+import com.example.polarh10.model.EcgSample
 import com.example.polarh10.model.HrSample
 import com.example.polarh10.model.HrStats
 import com.example.polarh10.model.SessionSummary
@@ -16,6 +18,7 @@ import com.polar.sdk.api.PolarBleApi
 import com.polar.sdk.api.PolarBleApiCallback
 import com.polar.sdk.api.PolarBleApiDefaultImpl
 import com.polar.sdk.api.model.PolarDeviceInfo
+import com.polar.sdk.api.model.EcgSample as PolarEcgSample
 import com.polar.sdk.api.model.PolarHealthThermometerData
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -44,11 +47,14 @@ data class PolarConnectionState(
     val devices: List<PolarDeviceItem> = emptyList(),
     val isHrStreaming: Boolean = false,
     val isAccStreaming: Boolean = false,
+    val isEcgStreaming: Boolean = false,
     val latestHr: Int? = null,
     val averageHr: Double = 0.0,
     val minHr: Int? = null,
     val maxHr: Int? = null,
     val liveHrValues: List<Int> = emptyList(),
+    val liveEcgValues: List<Int> = emptyList(),
+    val latestEcgVoltage: Int? = null,
     val latestRrMs: List<Int> = emptyList(),
     val hrSampleCount: Long = 0,
     val latestAcc: AccReading? = null,
@@ -56,11 +62,13 @@ data class PolarConnectionState(
     val peakMovement: Double = 0.0,
     val movementLevel: MovementLevel = MovementLevel.UNKNOWN,
     val accSampleCount: Long = 0,
+    val ecgSampleCount: Long = 0,
     val activeSessionId: Long? = null,
     val activeSessionStartTime: Long? = null,
     val isSessionRecording: Boolean = false,
     val savedHrCount: Long = 0,
     val savedAccCount: Long = 0,
+    val savedEcgCount: Long = 0,
     val isImportingHistory: Boolean = false,
     val importedSessionId: Long? = null,
     val importMessage: String = "No sample history imported",
@@ -80,7 +88,8 @@ data class HistorySessionItem(
 
 data class HistoryDetail(
     val item: HistorySessionItem,
-    val hrSamples: List<HrSample>
+    val hrSamples: List<HrSample>,
+    val ecgSamples: List<EcgSample>
 )
 
 data class AccReading(
@@ -112,8 +121,12 @@ class PolarH10Manager(
     private var scanJob: Job? = null
     private var hrJob: Job? = null
     private var accJob: Job? = null
+    private var ecgJob: Job? = null
     private val processor = SensorProcessor()
-    private val preferences = appContext.getSharedPreferences("polar_h10_settings", Context.MODE_PRIVATE)
+    private val preferences = context.applicationContext.getSharedPreferences(
+        "polar_h10_settings",
+        Context.MODE_PRIVATE
+    )
 
     init {
         _state.update {
@@ -151,6 +164,8 @@ class PolarH10Manager(
                         minHr = null,
                         maxHr = null,
                         liveHrValues = emptyList(),
+                        liveEcgValues = emptyList(),
+                        latestEcgVoltage = null,
                         latestRrMs = emptyList(),
                         hrSampleCount = 0,
                         latestAcc = null,
@@ -158,11 +173,13 @@ class PolarH10Manager(
                         peakMovement = 0.0,
                         movementLevel = MovementLevel.UNKNOWN,
                         accSampleCount = 0,
+                        ecgSampleCount = 0,
                         activeSessionId = null,
                         activeSessionStartTime = null,
                         isSessionRecording = false,
                         savedHrCount = 0,
                         savedAccCount = 0,
+                        savedEcgCount = 0,
                         message = "Connected to ${polarDeviceInfo.deviceId}"
                     )
                 }
@@ -179,6 +196,7 @@ class PolarH10Manager(
                         readyFeatures = emptySet(),
                         isHrStreaming = false,
                         isAccStreaming = false,
+                        isEcgStreaming = false,
                         message = "Disconnected from ${polarDeviceInfo.deviceId}"
                     )
                 }
@@ -314,12 +332,15 @@ class PolarH10Manager(
                             isSessionRecording = true,
                             savedHrCount = 0,
                             savedAccCount = 0,
+                            savedEcgCount = 0,
                             liveHrValues = emptyList(),
+                            liveEcgValues = emptyList(),
                             message = "Session #$sessionId started"
                         )
                     }
                     startHrStream()
                     startAccStream()
+                    startEcgStream()
                 }
                 .onFailure { error ->
                     _state.update {
@@ -427,7 +448,8 @@ class PolarH10Manager(
                 )
                 HistoryDetail(
                     item = item,
-                    hrSamples = database.getHrSamples(sessionId, Int.MAX_VALUE, 0)
+                    hrSamples = database.getHrSamples(sessionId, Int.MAX_VALUE, 0),
+                    ecgSamples = database.getEcgSamples(sessionId, 2000, 0)
                 )
             }.onSuccess { detail ->
                 _state.update {
@@ -617,9 +639,99 @@ class PolarH10Manager(
         }
     }
 
+    fun startEcgStream() {
+        val deviceId = _state.value.connectedDeviceId ?: run {
+            _state.update { it.copy(message = "Connect to H10 before starting ECG") }
+            return
+        }
+        if (ecgJob?.isActive == true) return
+
+        _state.update {
+            it.copy(
+                isEcgStreaming = true,
+                message = "Starting ECG stream"
+            )
+        }
+        ecgJob = scope.launch(Dispatchers.IO) {
+            runCatching {
+                api.requestStreamSettings(
+                    deviceId,
+                    PolarBleApi.PolarDeviceDataType.ECG
+                )
+            }.onSuccess { settings ->
+                api.startEcgStreaming(deviceId, settings)
+                    .catch { error ->
+                        Log.e(TAG, "ECG stream failed", error)
+                        _state.update {
+                            it.copy(
+                                isEcgStreaming = false,
+                                message = "ECG stream failed: ${error.message ?: "unknown error"}"
+                            )
+                        }
+                    }
+                    .collect { ecgData ->
+                        val samples = ecgData.samples.filterIsInstance<PolarEcgSample>()
+                        val latest = samples.lastOrNull()
+                        val sessionId = _state.value.activeSessionId
+                        if (sessionId != null) {
+                            database.insertEcgBatch(
+                                samples.map { sample ->
+                                    EcgSample(
+                                        id = 0,
+                                        sessionId = sessionId,
+                                        timestamp = sample.timeStamp,
+                                        voltage = sample.voltage
+                                    )
+                                }
+                            )
+                        }
+                        if (latest != null) {
+                            _state.update {
+                                it.copy(
+                                    latestEcgVoltage = latest.voltage,
+                                    liveEcgValues = (it.liveEcgValues + samples.map { sample -> sample.voltage }).takeLast(240),
+                                    ecgSampleCount = it.ecgSampleCount + samples.size,
+                                    savedEcgCount = if (sessionId != null) {
+                                        it.savedEcgCount + samples.size
+                                    } else {
+                                        it.savedEcgCount
+                                    },
+                                    message = "ECG ${latest.voltage} uV"
+                                )
+                            }
+                        }
+                    }
+            }.onFailure { error ->
+                Log.e(TAG, "ECG stream settings failed", error)
+                _state.update {
+                    it.copy(
+                        isEcgStreaming = false,
+                        message = "ECG settings failed: ${error.message ?: "unknown error"}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun stopEcgStream() {
+        val deviceId = _state.value.connectedDeviceId
+        ecgJob?.cancel()
+        ecgJob = null
+        if (deviceId != null) {
+            runCatching { api.stopStreaming(deviceId, PmdMeasurementType.ECG) }
+        }
+        _state.update {
+            it.copy(
+                isEcgStreaming = false,
+                message = "ECG stream stopped"
+            )
+        }
+    }
+
     fun stopStreams() {
         stopHrStream()
         stopAccStream()
+        stopEcgStream()
     }
 
     fun shutdown() {
