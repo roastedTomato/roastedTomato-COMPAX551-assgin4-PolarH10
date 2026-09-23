@@ -2,6 +2,8 @@ package com.example.polarh10.polar
 
 import android.content.Context
 import android.util.Log
+import com.example.polarh10.processing.MovementLevel
+import com.example.polarh10.processing.SensorProcessor
 import com.polar.androidcommunications.api.ble.model.DisInfo
 import com.polar.sdk.api.PolarBleApi
 import com.polar.sdk.api.PolarBleApiCallback
@@ -37,9 +39,15 @@ data class PolarConnectionState(
     val isHrStreaming: Boolean = false,
     val isAccStreaming: Boolean = false,
     val latestHr: Int? = null,
+    val averageHr: Double = 0.0,
+    val minHr: Int? = null,
+    val maxHr: Int? = null,
     val latestRrMs: List<Int> = emptyList(),
     val hrSampleCount: Long = 0,
     val latestAcc: AccReading? = null,
+    val smoothedMovement: Double = 0.0,
+    val peakMovement: Double = 0.0,
+    val movementLevel: MovementLevel = MovementLevel.UNKNOWN,
     val accSampleCount: Long = 0,
     val message: String = "Not connected"
 )
@@ -71,6 +79,7 @@ class PolarH10Manager(
     private var scanJob: Job? = null
     private var hrJob: Job? = null
     private var accJob: Job? = null
+    private val processor = SensorProcessor()
 
     init {
         api.setAutomaticReconnection(true)
@@ -100,9 +109,21 @@ class PolarH10Manager(
                         isConnecting = false,
                         isConnected = true,
                         connectedDeviceId = polarDeviceInfo.deviceId,
+                        latestHr = null,
+                        averageHr = 0.0,
+                        minHr = null,
+                        maxHr = null,
+                        latestRrMs = emptyList(),
+                        hrSampleCount = 0,
+                        latestAcc = null,
+                        smoothedMovement = 0.0,
+                        peakMovement = 0.0,
+                        movementLevel = MovementLevel.UNKNOWN,
+                        accSampleCount = 0,
                         message = "Connected to ${polarDeviceInfo.deviceId}"
                     )
                 }
+                processor.reset()
             }
 
             override fun deviceDisconnected(polarDeviceInfo: PolarDeviceInfo) {
@@ -257,11 +278,15 @@ class PolarH10Manager(
                 }
                 .collect { hrData ->
                     val sample = hrData.samples.lastOrNull() ?: return@collect
+                    val summary = processor.addHeartRate(sample.hr)
                     _state.update {
                         it.copy(
-                            latestHr = sample.hr,
+                            latestHr = summary.latest,
+                            averageHr = summary.average,
+                            minHr = summary.min,
+                            maxHr = summary.max,
                             latestRrMs = sample.rrsMs,
-                            hrSampleCount = it.hrSampleCount + hrData.samples.size,
+                            hrSampleCount = summary.sampleCount,
                             message = "HR ${sample.hr} bpm"
                         )
                     }
@@ -318,22 +343,22 @@ class PolarH10Manager(
                     }
                     .collect { accData ->
                         val sample = accData.samples.lastOrNull() ?: return@collect
+                        val summary = processor.addAccelerometer(sample.x, sample.y, sample.z)
                         val reading = AccReading(
                             x = sample.x,
                             y = sample.y,
                             z = sample.z,
                             timestamp = sample.timeStamp,
-                            magnitude = sqrt(
-                                sample.x.toDouble() * sample.x +
-                                    sample.y.toDouble() * sample.y +
-                                    sample.z.toDouble() * sample.z
-                            )
+                            magnitude = summary.latestMagnitude
                         )
                         _state.update {
                             it.copy(
                                 latestAcc = reading,
-                                accSampleCount = it.accSampleCount + accData.samples.size,
-                                message = "ACC samples ${it.accSampleCount + accData.samples.size}"
+                                smoothedMovement = summary.smoothedIntensity,
+                                peakMovement = summary.peakIntensity,
+                                movementLevel = summary.level,
+                                accSampleCount = summary.sampleCount,
+                                message = "Movement ${summary.level.name.lowercase()}"
                             )
                         }
                     }

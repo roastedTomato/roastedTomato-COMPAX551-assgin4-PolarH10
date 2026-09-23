@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import com.example.polarh10.polar.PolarConnectionState
 import com.example.polarh10.polar.PolarDeviceItem
 import com.example.polarh10.polar.PolarH10Manager
+import com.example.polarh10.processing.MovementLevel
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -154,7 +155,11 @@ private fun DashboardScreen(
             MetricCard(
                 modifier = Modifier.weight(1f),
                 label = "Movement",
-                value = state.latestAcc?.let { "%.0f mG".format(it.magnitude) } ?: "--"
+                value = if (state.movementLevel == MovementLevel.UNKNOWN) {
+                    "--"
+                } else {
+                    state.movementLevel.name.lowercase()
+                }
             )
         }
 
@@ -226,6 +231,7 @@ private fun SensorDataCard(state: PolarConnectionState) {
             )
             SampleRow("HR stream", if (state.isHrStreaming) "Running" else "Stopped")
             SampleRow("HR samples", state.hrSampleCount.toString())
+            SampleRow("Avg / Min / Max HR", hrStatsText(state))
             SampleRow(
                 "RR intervals",
                 if (state.latestRrMs.isEmpty()) "--" else state.latestRrMs.joinToString(" ms, ", postfix = " ms")
@@ -233,6 +239,9 @@ private fun SensorDataCard(state: PolarConnectionState) {
             HorizontalDivider()
             SampleRow("ACC stream", if (state.isAccStreaming) "Running" else "Stopped")
             SampleRow("ACC samples", state.accSampleCount.toString())
+            SampleRow("Raw magnitude", state.latestAcc?.let { "%.0f mG".format(it.magnitude) } ?: "--")
+            SampleRow("Smoothed movement", "%.0f mG".format(state.smoothedMovement))
+            SampleRow("Peak movement", "%.0f mG".format(state.peakMovement))
             SampleRow(
                 "ACC x/y/z",
                 state.latestAcc?.let { "${it.x}, ${it.y}, ${it.z} mG" } ?: "--"
@@ -402,3 +411,14 @@ private fun requiredBluetoothPermissions(): Array<String> =
         Manifest.permission.BLUETOOTH_SCAN,
         Manifest.permission.BLUETOOTH_CONNECT
     )
+
+private fun hrStatsText(state: PolarConnectionState): String =
+    if (state.hrSampleCount == 0L) {
+        "--"
+    } else {
+        "%.1f / %d / %d bpm".format(
+            state.averageHr,
+            state.minHr ?: 0,
+            state.maxHr ?: 0
+        )
+    }
