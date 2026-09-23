@@ -131,6 +131,21 @@ class DatabaseHelper(context: Context) :
         return writableDatabase.insert(TABLE_SESSIONS, null, values)
     }
 
+    fun createImportedSession(
+        deviceId: String,
+        startTime: Long,
+        endTime: Long?,
+        note: String? = null
+    ): Long {
+        val values = ContentValues().apply {
+            put("device_id", deviceId)
+            put("start_time", startTime)
+            if (endTime != null) put("end_time", endTime)
+            put("note", note)
+        }
+        return writableDatabase.insert(TABLE_SESSIONS, null, values)
+    }
+
     /** 【数据记录】结束会话：回写结束时间（默认当前时间） */
     fun endSession(sessionId: Long, endTime: Long = System.currentTimeMillis()) {
         val values = ContentValues().apply { put("end_time", endTime) }

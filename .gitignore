@@ -21,3 +21,6 @@ captures/
 *.pem
 keystore.properties
 .env
+
+# Local sample exports copied into assets when needed
+/PolarH10_session/

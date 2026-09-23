@@ -3,6 +3,7 @@ package com.example.polarh10.polar
 import android.content.Context
 import android.util.Log
 import com.example.polarh10.db.DatabaseHelper
+import com.example.polarh10.importer.SampleHistoryImporter
 import com.example.polarh10.model.AccSample
 import com.example.polarh10.processing.MovementLevel
 import com.example.polarh10.processing.SensorProcessor
@@ -54,6 +55,9 @@ data class PolarConnectionState(
     val isSessionRecording: Boolean = false,
     val savedHrCount: Long = 0,
     val savedAccCount: Long = 0,
+    val isImportingHistory: Boolean = false,
+    val importedSessionId: Long? = null,
+    val importMessage: String = "No sample history imported",
     val message: String = "Not connected"
 )
 
@@ -69,7 +73,8 @@ class PolarH10Manager(
     context: Context,
     private val scope: CoroutineScope
 ) {
-    private val database = DatabaseHelper(context.applicationContext)
+    private val appContext = context.applicationContext
+    private val database = DatabaseHelper(appContext)
     private val api: PolarBleApi = PolarBleApiDefaultImpl.defaultImplementation(
         context.applicationContext,
         setOf(
@@ -311,6 +316,38 @@ class PolarH10Manager(
                         it.copy(message = "Stop session failed: ${error.message ?: "unknown error"}")
                     }
                 }
+        }
+    }
+
+    fun importSampleHistory() {
+        if (_state.value.isImportingHistory) return
+        _state.update {
+            it.copy(
+                isImportingHistory = true,
+                importMessage = "Importing sample history..."
+            )
+        }
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                SampleHistoryImporter(appContext, database).importFromAssets()
+            }.onSuccess { result ->
+                _state.update {
+                    it.copy(
+                        isImportingHistory = false,
+                        importedSessionId = result.sessionId,
+                        importMessage = "Imported session #${result.sessionId}: ${result.hrCount} HR, ${result.accCount} ACC",
+                        message = "Sample history imported"
+                    )
+                }
+            }.onFailure { error ->
+                _state.update {
+                    it.copy(
+                        isImportingHistory = false,
+                        importMessage = "Import failed: ${error.message ?: "unknown error"}",
+                        message = "Sample import failed"
+                    )
+                }
+            }
         }
     }
 

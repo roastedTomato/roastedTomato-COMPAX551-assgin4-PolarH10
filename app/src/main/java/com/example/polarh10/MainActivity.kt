@@ -7,6 +7,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
@@ -85,7 +87,8 @@ private fun PolarH10App() {
                 onStartAcc = manager::startAccStream,
                 onStopAcc = manager::stopAccStream,
                 onStartSession = manager::startSession,
-                onStopSession = manager::stopSession
+                onStopSession = manager::stopSession,
+                onImportSampleHistory = manager::importSampleHistory
             )
         }
     }
@@ -103,11 +106,14 @@ private fun DashboardScreen(
     onStartAcc: () -> Unit,
     onStopAcc: () -> Unit,
     onStartSession: () -> Unit,
-    onStopSession: () -> Unit
+    onStopSession: () -> Unit,
+    onImportSampleHistory: () -> Unit
 ) {
+    val scrollState = rememberScrollState()
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(scrollState)
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
@@ -181,6 +187,11 @@ private fun DashboardScreen(
             onStopSession = onStopSession
         )
 
+        ImportHistoryCard(
+            state = state,
+            onImportSampleHistory = onImportSampleHistory
+        )
+
         SensorDataCard(state = state)
 
         DeviceList(
@@ -194,7 +205,38 @@ private fun DashboardScreen(
             secondary = "HR and online streaming will be used in the next step"
         )
 
-        Spacer(modifier = Modifier.weight(1f))
+        Spacer(modifier = Modifier.height(12.dp))
+    }
+}
+
+@Composable
+private fun ImportHistoryCard(
+    state: PolarConnectionState,
+    onImportSampleHistory: () -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = "Sample History",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                text = state.importMessage,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !state.isImportingHistory,
+                onClick = onImportSampleHistory
+            ) {
+                Text(if (state.isImportingHistory) "Importing..." else "Import Sample History")
+            }
+        }
     }
 }
 
