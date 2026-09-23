@@ -24,6 +24,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -39,13 +40,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
-import com.example.polarh10.polar.HistorySessionItem
+import androidx.compose.material3.AlertDialog
 import com.example.polarh10.model.HrSample
+import com.example.polarh10.polar.HistoryDetail
+import com.example.polarh10.polar.HistorySessionItem
 import com.example.polarh10.polar.PolarConnectionState
 import com.example.polarh10.polar.PolarDeviceItem
 import com.example.polarh10.polar.PolarH10Manager
 import com.example.polarh10.processing.MovementLevel
+import androidx.compose.material3.TextButton
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -104,7 +110,6 @@ private fun PolarH10App() {
                     onStopAcc = manager::stopAccStream,
                     onStartSession = manager::startSession,
                     onStopSession = manager::stopSession,
-                    onImportSampleHistory = manager::importSampleHistory,
                     onOpenHistory = {
                         manager.refreshHistory()
                         page = AppPage.History
@@ -115,7 +120,9 @@ private fun PolarH10App() {
                     state = state,
                     onBack = { page = AppPage.Dashboard },
                     onRefreshHistory = manager::refreshHistory,
-                    onSelectSession = manager::loadHistoryDetail
+                    onSelectSession = manager::loadHistoryDetail,
+                    onImportSampleHistory = manager::importSampleHistory,
+                    onWeightChange = manager::updateWeightKg
                 )
             }
         }
@@ -135,113 +142,222 @@ private fun DashboardScreen(
     onStopAcc: () -> Unit,
     onStartSession: () -> Unit,
     onStopSession: () -> Unit,
-    onImportSampleHistory: () -> Unit,
     onOpenHistory: () -> Unit
 ) {
     val scrollState = rememberScrollState()
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(scrollState)
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Text(
-            text = "Polar H10 Monitor",
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold
-        )
-        Text(
-            text = "Connection setup",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(scrollState),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Text(
+                text = "Polar H10 Monitor",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = connectionLabel(state),
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (state.isConnected) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                }
+            )
 
-        StatusCard(
-            title = "Connection",
-            primary = connectionLabel(state),
-            secondary = state.message
-        )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Button(
+                    modifier = Modifier.weight(1f),
+                    onClick = if (state.isScanning) onStopScan else onScan
+                ) {
+                    Text(if (state.isScanning) "Stop Scan" else "Scan")
+                }
+                Button(
+                    modifier = Modifier.weight(1f),
+                    enabled = state.isConnected,
+                    onClick = onDisconnect
+                ) {
+                    Text("Disconnect")
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                HeartRateHeroCard(
+                    modifier = Modifier.weight(1f),
+                    state = state
+                )
+                MovementHeroCard(
+                    modifier = Modifier.weight(1f),
+                    state = state
+                )
+            }
+
+            WorkoutSummaryCard(state = state)
+
+            LiveHeartRateCard(state = state)
+
+            StreamControls(
+                state = state,
+                onStartHr = onStartHr,
+                onStopHr = onStopHr,
+                onStartAcc = onStartAcc,
+                onStopAcc = onStopAcc
+            )
+
+            SensorDataCard(state = state)
+
+            DeviceList(
+                devices = state.devices,
+                onConnect = onConnect
+            )
+
+            StatusCard(
+                title = "Ready Features",
+                primary = if (state.readyFeatures.isEmpty()) "--" else state.readyFeatures.joinToString(),
+                secondary = "HR and online streaming will be used in the next step"
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+        }
 
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Button(
-                modifier = Modifier.weight(1f),
-                onClick = if (state.isScanning) onStopScan else onScan
-            ) {
-                Text(if (state.isScanning) "Stop Scan" else "Scan")
-            }
             Button(
                 modifier = Modifier.weight(1f),
                 enabled = state.isConnected,
-                onClick = onDisconnect
+                onClick = if (state.isSessionRecording) onStopSession else onStartSession
             ) {
-                Text("Disconnect")
+                Text(if (state.isSessionRecording) "Stop Session" else "Start Session")
+            }
+            Button(
+                modifier = Modifier.weight(1f),
+                onClick = onOpenHistory
+            ) {
+                Text("Open History")
             }
         }
+    }
+}
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+@Composable
+private fun HeartRateHeroCard(
+    modifier: Modifier = Modifier,
+    state: PolarConnectionState
+) {
+    Card(modifier = modifier.height(150.dp)) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.SpaceBetween
         ) {
-            MetricCard(
-                modifier = Modifier.weight(1f),
-                label = "Heart Rate",
-                value = state.latestHr?.let { "$it bpm" } ?: "--"
+            Text(
+                text = "Heart Rate",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary
             )
-            MetricCard(
-                modifier = Modifier.weight(1f),
-                label = "Movement",
-                value = if (state.movementLevel == MovementLevel.UNKNOWN) {
+            Text(
+                text = state.latestHr?.let { "$it" } ?: "--",
+                style = MaterialTheme.typography.displaySmall,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = state.latestHr?.let { "bpm" } ?: "Waiting for HR",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun MovementHeroCard(
+    modifier: Modifier = Modifier,
+    state: PolarConnectionState
+) {
+    Card(modifier = modifier.height(150.dp)) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = "Intensity",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                text = if (state.movementLevel == MovementLevel.UNKNOWN) {
                     "--"
                 } else {
-                    state.movementLevel.name.lowercase()
-                }
+                    state.movementLevel.name.lowercase().replaceFirstChar { it.uppercase() }
+                },
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = state.latestAcc?.let { "%.0f mG".format(it.magnitude) } ?: "Waiting for ACC",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+    }
+}
 
-        StreamControls(
-            state = state,
-            onStartHr = onStartHr,
-            onStopHr = onStopHr,
-            onStartAcc = onStartAcc,
-            onStopAcc = onStopAcc
-        )
-
-        SessionCard(
-            state = state,
-            onStartSession = onStartSession,
-            onStopSession = onStopSession
-        )
-
-        ImportHistoryCard(
-            state = state,
-            onImportSampleHistory = onImportSampleHistory
-        )
-
-        Button(
-            modifier = Modifier.fillMaxWidth(),
-            onClick = onOpenHistory
+@Composable
+private fun WorkoutSummaryCard(state: PolarConnectionState) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text("Open History")
+            Text(
+                text = "Current Session",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary
+            )
+            HistoryMetricGrid(
+                duration = liveDurationText(state),
+                avgHr = historyHrText(state.averageHr, state.hrSampleCount),
+                calories = liveCaloriesText(state),
+                minHr = state.minHr?.let { "$it bpm" } ?: "--",
+                maxHr = state.maxHr?.let { "$it bpm" } ?: "--",
+                onCaloriesClick = null
+            )
         }
+    }
+}
 
-        SensorDataCard(state = state)
-
-        DeviceList(
-            devices = state.devices,
-            onConnect = onConnect
-        )
-
-        StatusCard(
-            title = "Ready Features",
-            primary = if (state.readyFeatures.isEmpty()) "--" else state.readyFeatures.joinToString(),
-            secondary = "HR and online streaming will be used in the next step"
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
+@Composable
+private fun LiveHeartRateCard(state: PolarConnectionState) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = "Live Heart Rate Curve",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary
+            )
+            HeartRateValueChart(values = state.liveHrValues)
+        }
     }
 }
 
@@ -250,9 +366,47 @@ private fun HistoryScreen(
     state: PolarConnectionState,
     onBack: () -> Unit,
     onRefreshHistory: () -> Unit,
-    onSelectSession: (Long) -> Unit
+    onSelectSession: (Long) -> Unit,
+    onImportSampleHistory: () -> Unit,
+    onWeightChange: (String) -> Unit
 ) {
     val scrollState = rememberScrollState()
+    var showWeightDialog by remember { mutableStateOf(false) }
+    var weightInput by remember(state.weightKg) { mutableStateOf(state.weightKg) }
+
+    if (showWeightDialog) {
+        AlertDialog(
+            onDismissRequest = { showWeightDialog = false },
+            title = { Text("Body Weight") },
+            text = {
+                OutlinedTextField(
+                    modifier = Modifier.fillMaxWidth(),
+                    value = weightInput,
+                    onValueChange = { weightInput = it },
+                    label = { Text("Weight") },
+                    suffix = { Text("kg") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onWeightChange(weightInput)
+                        showWeightDialog = false
+                    }
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showWeightDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -283,6 +437,29 @@ private fun HistoryScreen(
             Text(if (state.isLoadingHistory) "Loading..." else "Refresh History")
         }
 
+        state.selectedHistory?.let { detail ->
+            HistoryDetailCard(
+                detail = detail,
+                weightKg = state.weightKg,
+                onCaloriesClick = {
+                    weightInput = state.weightKg
+                    showWeightDialog = true
+                }
+            )
+        } ?: if (state.isLoadingHistoryDetail) {
+            StatusCard(
+                title = "Chart",
+                primary = "Loading...",
+                secondary = "Reading session data"
+            )
+        } else {
+            StatusCard(
+                title = "Chart",
+                primary = "Select a session",
+                secondary = "Tap a history item to show the heart rate curve"
+            )
+        }
+
         if (state.historySessions.isEmpty()) {
             StatusCard(
                 title = "Saved Sessions",
@@ -290,6 +467,11 @@ private fun HistoryScreen(
                 secondary = "Import sample history or record a new session first"
             )
         } else {
+            Text(
+                text = "Saved Sessions",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
             state.historySessions.forEach { item ->
                 Card(
                     modifier = Modifier
@@ -311,50 +493,114 @@ private fun HistoryScreen(
             }
         }
 
-        state.selectedHistory?.let { detail ->
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Text(
-                        text = "Heart Rate Chart - Session #${detail.item.session.id}",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    HeartRateChart(samples = detail.hrSamples)
-                    SampleRow("Samples", detail.hrSamples.size.toString())
-                    SampleRow(
-                        "Avg / Min / Max",
-                        "%.1f / %d / %d bpm".format(
-                            detail.item.hrStats.avg,
-                            detail.item.hrStats.min,
-                            detail.item.hrStats.max
-                        )
-                    )
-                }
-            }
-        } ?: if (state.isLoadingHistoryDetail) {
-            StatusCard(
-                title = "Chart",
-                primary = "Loading...",
-                secondary = "Reading session data"
-            )
-        } else {
-            StatusCard(
-                title = "Chart",
-                primary = "Select a session",
-                secondary = "Tap a history item to show the heart rate curve"
-            )
-        }
+        ImportHistoryCard(
+            state = state,
+            onImportSampleHistory = onImportSampleHistory
+        )
 
         Spacer(modifier = Modifier.height(12.dp))
     }
 }
 
 @Composable
+private fun HistoryDetailCard(
+    detail: HistoryDetail,
+    weightKg: String,
+    onCaloriesClick: (() -> Unit)?
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = "Session #${detail.item.session.id}",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+
+            HistoryMetricGrid(
+                duration = durationText(detail.item.session.startTime, detail.item.session.endTime),
+                avgHr = historyHrText(detail.item.hrStats.avg, detail.item.hrStats.count),
+                calories = estimatedCaloriesText(detail, weightKg),
+                minHr = historyIntHrText(detail.item.hrStats.min, detail.item.hrStats.count),
+                maxHr = historyIntHrText(detail.item.hrStats.max, detail.item.hrStats.count),
+                onCaloriesClick = onCaloriesClick
+            )
+
+            Text(
+                text = "Heart Rate Curve",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary
+            )
+            HeartRateChart(samples = detail.hrSamples)
+        }
+    }
+}
+
+@Composable
+private fun HistoryMetricGrid(
+    duration: String,
+    avgHr: String,
+    calories: String,
+    minHr: String,
+    maxHr: String,
+    onCaloriesClick: (() -> Unit)?
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            MetricCard(
+                modifier = Modifier.weight(1f),
+                label = "Duration",
+                value = duration
+            )
+            MetricCard(
+                modifier = Modifier.weight(1f),
+                label = "Avg HR",
+                value = avgHr
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            MetricCard(
+                modifier = Modifier.weight(1f),
+                label = "Calories",
+                value = calories,
+                onClick = onCaloriesClick
+            )
+            MetricCard(
+                modifier = Modifier.weight(1f),
+                label = "Min HR",
+                value = minHr
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            MetricCard(
+                modifier = Modifier.weight(1f),
+                label = "Max HR",
+                value = maxHr
+            )
+            Spacer(modifier = Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
 private fun HeartRateChart(samples: List<HrSample>) {
-    if (samples.size < 2) {
+    HeartRateValueChart(values = remember(samples) { samples.map { it.hr } })
+}
+
+@Composable
+private fun HeartRateValueChart(values: List<Int>) {
+    if (values.size < 2) {
         Text(
             text = "Not enough HR data for chart",
             style = MaterialTheme.typography.bodyMedium,
@@ -365,7 +611,6 @@ private fun HeartRateChart(samples: List<HrSample>) {
 
     val lineColor = MaterialTheme.colorScheme.primary
     val gridColor = MaterialTheme.colorScheme.outlineVariant
-    val values = remember(samples) { samples.map { it.hr } }
     val minHr = values.minOrNull() ?: 0
     val maxHr = values.maxOrNull() ?: 0
     val range = (maxHr - minHr).coerceAtLeast(1)
@@ -720,9 +965,14 @@ private fun StatusCard(
 private fun MetricCard(
     modifier: Modifier = Modifier,
     label: String,
-    value: String
+    value: String,
+    onClick: (() -> Unit)? = null
 ) {
-    Card(modifier = modifier.height(112.dp)) {
+    val cardModifier = modifier
+        .height(112.dp)
+        .then(if (onClick == null) Modifier else Modifier.clickable(onClick = onClick))
+
+    Card(modifier = cardModifier) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -782,4 +1032,58 @@ private fun durationText(startTime: Long, endTime: Long?): String {
     } else {
         "${remainingSeconds}s"
     }
+}
+
+private fun durationMinutes(startTime: Long, endTime: Long?): Double {
+    if (endTime == null) return 0.0
+    val millis = (endTime - startTime).coerceAtLeast(0)
+    return millis / 60000.0
+}
+
+private fun historyHrText(value: Double, count: Long): String =
+    if (count == 0L) "--" else "%.1f bpm".format(value)
+
+private fun historyIntHrText(value: Int, count: Long): String =
+    if (count == 0L) "--" else "$value bpm"
+
+private fun estimatedCaloriesText(detail: HistoryDetail, weightKg: String): String {
+    val weight = weightKg.toDoubleOrNull() ?: return "--"
+    if (weight <= 0.0 || detail.item.hrStats.count == 0L) return "--"
+
+    val minutes = durationMinutes(
+        detail.item.session.startTime,
+        detail.item.session.endTime
+    )
+    if (minutes <= 0.0) return "--"
+
+    val calories = minutes * weight * detail.item.hrStats.avg / 200.0
+    return "%.0f kcal".format(calories)
+}
+
+private fun liveDurationText(state: PolarConnectionState): String {
+    val startTime = state.activeSessionStartTime
+    if (state.isSessionRecording && startTime != null) {
+        return durationText(startTime, System.currentTimeMillis())
+    }
+    return if (state.savedHrCount > 0) {
+        val minutes = state.savedHrCount / 60
+        val seconds = state.savedHrCount % 60
+        if (minutes > 0) "${minutes}m ${seconds}s" else "${seconds}s"
+    } else {
+        "--"
+    }
+}
+
+private fun liveCaloriesText(state: PolarConnectionState): String {
+    val weight = state.weightKg.toDoubleOrNull() ?: return "--"
+    if (weight <= 0.0 || state.hrSampleCount == 0L) return "--"
+
+    val minutes = state.activeSessionStartTime?.let {
+        (System.currentTimeMillis() - it).coerceAtLeast(0) / 60000.0
+    } ?: (state.savedHrCount / 60.0)
+
+    if (minutes <= 0.0) return "--"
+
+    val calories = minutes * weight * state.averageHr / 200.0
+    return "%.0f kcal".format(calories)
 }

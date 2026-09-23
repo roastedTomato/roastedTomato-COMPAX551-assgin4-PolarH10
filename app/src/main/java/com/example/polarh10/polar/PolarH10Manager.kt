@@ -48,6 +48,7 @@ data class PolarConnectionState(
     val averageHr: Double = 0.0,
     val minHr: Int? = null,
     val maxHr: Int? = null,
+    val liveHrValues: List<Int> = emptyList(),
     val latestRrMs: List<Int> = emptyList(),
     val hrSampleCount: Long = 0,
     val latestAcc: AccReading? = null,
@@ -56,6 +57,7 @@ data class PolarConnectionState(
     val movementLevel: MovementLevel = MovementLevel.UNKNOWN,
     val accSampleCount: Long = 0,
     val activeSessionId: Long? = null,
+    val activeSessionStartTime: Long? = null,
     val isSessionRecording: Boolean = false,
     val savedHrCount: Long = 0,
     val savedAccCount: Long = 0,
@@ -66,6 +68,7 @@ data class PolarConnectionState(
     val isLoadingHistory: Boolean = false,
     val selectedHistory: HistoryDetail? = null,
     val isLoadingHistoryDetail: Boolean = false,
+    val weightKg: String = "",
     val message: String = "Not connected"
 )
 
@@ -110,8 +113,12 @@ class PolarH10Manager(
     private var hrJob: Job? = null
     private var accJob: Job? = null
     private val processor = SensorProcessor()
+    private val preferences = appContext.getSharedPreferences("polar_h10_settings", Context.MODE_PRIVATE)
 
     init {
+        _state.update {
+            it.copy(weightKg = preferences.getString(KEY_WEIGHT_KG, "") ?: "")
+        }
         api.setAutomaticReconnection(true)
         api.setApiCallback(object : PolarBleApiCallback() {
             override fun blePowerStateChanged(powered: Boolean) {
@@ -143,6 +150,7 @@ class PolarH10Manager(
                         averageHr = 0.0,
                         minHr = null,
                         maxHr = null,
+                        liveHrValues = emptyList(),
                         latestRrMs = emptyList(),
                         hrSampleCount = 0,
                         latestAcc = null,
@@ -151,6 +159,7 @@ class PolarH10Manager(
                         movementLevel = MovementLevel.UNKNOWN,
                         accSampleCount = 0,
                         activeSessionId = null,
+                        activeSessionStartTime = null,
                         isSessionRecording = false,
                         savedHrCount = 0,
                         savedAccCount = 0,
@@ -301,9 +310,11 @@ class PolarH10Manager(
                     _state.update {
                         it.copy(
                             activeSessionId = sessionId,
+                            activeSessionStartTime = System.currentTimeMillis(),
                             isSessionRecording = true,
                             savedHrCount = 0,
                             savedAccCount = 0,
+                            liveHrValues = emptyList(),
                             message = "Session #$sessionId started"
                         )
                     }
@@ -326,6 +337,7 @@ class PolarH10Manager(
                     _state.update {
                         it.copy(
                             activeSessionId = null,
+                            activeSessionStartTime = null,
                             isSessionRecording = false,
                             message = "Session #$sessionId saved"
                         )
@@ -435,6 +447,12 @@ class PolarH10Manager(
         }
     }
 
+    fun updateWeightKg(weightKg: String) {
+        val cleaned = weightKg.filter { it.isDigit() || it == '.' }
+        _state.update { it.copy(weightKg = cleaned) }
+        preferences.edit().putString(KEY_WEIGHT_KG, cleaned).apply()
+    }
+
     fun startHrStream() {
         val deviceId = _state.value.connectedDeviceId ?: run {
             _state.update { it.copy(message = "Connect to H10 before starting HR") }
@@ -477,6 +495,7 @@ class PolarH10Manager(
                             averageHr = summary.average,
                             minHr = summary.min,
                             maxHr = summary.max,
+                            liveHrValues = (it.liveHrValues + sample.hr).takeLast(120),
                             latestRrMs = sample.rrsMs,
                             hrSampleCount = summary.sampleCount,
                             savedHrCount = if (sessionId != null) it.savedHrCount + 1 else it.savedHrCount,
@@ -613,5 +632,6 @@ class PolarH10Manager(
 
     private companion object {
         const val TAG = "PolarH10Manager"
+        const val KEY_WEIGHT_KG = "weight_kg"
     }
 }
